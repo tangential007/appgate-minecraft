@@ -1,0 +1,20 @@
+#!/bin/sh
+# Appgate appliance customization: stop the Minecraft server.
+# Called before upgrades and before a new customization starts.
+# SIGTERM makes the server save the world before exiting.
+# The world in MC_HOME and the service account are kept.
+UNIT=cz-minecraft
+CHAIN=CZ-MINECRAFT
+
+systemctl stop "$UNIT" 2>/dev/null
+systemctl reset-failed "$UNIT" 2>/dev/null
+
+if command -v iptables >/dev/null 2>&1; then
+    while iptables -D INPUT -j "$CHAIN" 2>/dev/null; do :; done
+    iptables -F "$CHAIN" 2>/dev/null
+    iptables -X "$CHAIN" 2>/dev/null
+fi
+
+command -v auditgen >/dev/null 2>&1 && auditgen cz-minecraft event_type=stopped
+logger -t cz-minecraft "stopped $UNIT"
+exit 0

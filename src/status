@@ -1,0 +1,27 @@
+#!/bin/sh
+# Appgate appliance customization health check (read-only).
+# Exit 0 = healthy, 6 = warning, anything else = error.
+# The message is shown on the dashboard for warning/error.
+BASE=/opt/customization/data
+UNIT=cz-minecraft
+CHAIN=CZ-MINECRAFT
+# shellcheck source-path=SCRIPTDIR source=data/minecraft.conf
+. "$BASE/minecraft.conf"
+
+if ! systemctl is-active --quiet "$UNIT"; then
+    echo "Minecraft server is not running ($(systemctl is-active "$UNIT" 2>/dev/null))"
+    exit 1
+fi
+
+if command -v iptables >/dev/null 2>&1 && ! iptables -C INPUT -j "$CHAIN" 2>/dev/null; then
+    echo "Minecraft running but firewall rule for tcp/$MC_PORT is missing (appliance firewall reloaded?)"
+    exit 6
+fi
+
+if command -v ss >/dev/null 2>&1 && ! ss -Hltn "sport = :$MC_PORT" | grep -q .; then
+    echo "Minecraft process up but not listening on tcp/$MC_PORT yet (still starting?)"
+    exit 6
+fi
+
+echo "Minecraft server running on tcp/$MC_PORT"
+exit 0

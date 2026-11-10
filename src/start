@@ -1,0 +1,71 @@
+#!/bin/sh
+# Appgate appliance customization: start a Minecraft server.
+# Runs as root on boot or when the customization changes. Returns quickly;
+# the server itself runs as a transient systemd unit under an unprivileged user.
+set -eu
+
+BASE=/opt/customization/data
+UNIT=cz-minecraft
+CHAIN=CZ-MINECRAFT
+# shellcheck source-path=SCRIPTDIR source=data/minecraft.conf
+. "$BASE/minecraft.conf"
+
+log() { logger -t cz-minecraft "$*"; echo "$*"; }
+
+# 1. Unprivileged service account
+if ! id "$MC_USER" >/dev/null 2>&1; then
+    useradd --system --no-create-home --home-dir "$MC_HOME" \
+            --shell /usr/sbin/nologin "$MC_USER"
+    log "created user $MC_USER"
+fi
+
+# 2. Package files readable by the service account, java executable
+chmod -R a+rX "$BASE"
+chmod 0755 "$BASE/jre/bin/java"
+
+# 3. Persistent server directory (world survives re-uploads)
+mkdir -p "$MC_HOME"
+[ -f "$MC_HOME/server.properties" ] || cp "$BASE/server.properties" "$MC_HOME/"
+cp -f "$BASE/eula.txt" "$MC_HOME/eula.txt"
+sed -i "s/^server-port=.*/server-port=$MC_PORT/" "$MC_HOME/server.properties"
+chown -R "$MC_USER:$MC_USER" "$MC_HOME"
+chmod 0750 "$MC_HOME"
+
+# 4. Firewall: dedicated chain, only from MC_ALLOW_FROM
+if command -v iptables >/dev/null 2>&1; then
+    iptables -N "$CHAIN" 2>/dev/null || iptables -F "$CHAIN"
+    for net in $MC_ALLOW_FROM; do
+        iptables -A "$CHAIN" -s "$net" -p tcp --dport "$MC_PORT" -j ACCEPT
+    done
+    iptables -C INPUT -j "$CHAIN" 2>/dev/null || iptables -I INPUT 1 -j "$CHAIN"
+    log "firewall: tcp/$MC_PORT allowed from $MC_ALLOW_FROM"
+else
+    log "WARNING: iptables not found; port $MC_PORT not opened"
+fi
+
+# 5. (Re)launch as a sandboxed, resource-capped transient unit
+systemctl stop "$UNIT" 2>/dev/null || true
+systemctl reset-failed "$UNIT" 2>/dev/null || true
+
+systemd-run --unit="$UNIT" \
+    --description="Minecraft server (Appgate customization)" \
+    --uid="$MC_USER" --gid="$MC_USER" \
+    --setenv=HOME="$MC_HOME" \
+    -p WorkingDirectory="$MC_HOME" \
+    -p MemoryMax="$MC_MEMORY_MAX" \
+    -p CPUQuota="$MC_CPU_QUOTA" \
+    -p Nice=10 \
+    -p Restart=on-failure -p RestartSec=30 \
+    -p TimeoutStopSec=90 \
+    -p NoNewPrivileges=yes \
+    -p PrivateTmp=yes \
+    -p ProtectHome=yes \
+    -p ProtectSystem=strict \
+    -p ReadWritePaths="$MC_HOME" \
+    "$BASE/jre/bin/java" -Xms"$MC_HEAP_MIN" -Xmx"$MC_HEAP_MAX" \
+        -jar "$BASE/server.jar" nogui
+
+command -v auditgen >/dev/null 2>&1 && \
+    auditgen cz-minecraft event_type=started port="$MC_PORT" || true
+log "started $UNIT on port $MC_PORT"
+exit 0

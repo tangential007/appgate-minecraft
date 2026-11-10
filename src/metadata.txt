@@ -1,0 +1,3 @@
+# Appliance versions this customization may run on. Adjust to your collective.
+MIN_APPLIANCE_VERSION=6.2
+MAX_APPLIANCE_VERSION=7
