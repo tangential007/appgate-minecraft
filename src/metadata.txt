@@ -1,3 +1,5 @@
-# Appliance versions this customization may run on. Adjust to your collective.
+# Appliance versions this customization may run on.
+# A missing component sorts lower than any number, so MAX=7 excludes 7.0.0.
+# Nothing here is version-specific; the range is effectively open.
 MIN_APPLIANCE_VERSION=6.2
-MAX_APPLIANCE_VERSION=7
+MAX_APPLIANCE_VERSION=99
